@@ -861,24 +861,34 @@ main(int argc, char** argv)
 
 	if (optind < argc) {
 		int smfd;
-		/* Don't use stat because that doesn't work on /proc/kallsyms */
-		g_sysmap_size = 4 << 20; 
-	again:
+		int nread;
+		int allocd = 0;
+
 		smfd = open(argv[optind], O_RDONLY);
 		if (smfd < 0) {
-			printf("Can't load system.map <%s>", argv[optind]);
-		} else {
-			g_sysmap = malloc(g_sysmap_size);
-			long n = read(smfd, g_sysmap, g_sysmap_size);
-			close(smfd);
-			if (n == g_sysmap_size)  {
-				if (g_sysmap_size > 128<<20)
-					exit(1);
-				g_sysmap_size <<= 1;
-				goto again;
-			}
-			g_sysmap_size = n;
+			printf("Can't load system.map <%s>\n", argv[optind]);
+			exit(1);
 		}
+
+		do {
+			if (g_sysmap_size == allocd) {
+				/* Don't use stat because that doesn't work on /proc/kallsyms */
+				allocd += 4096;
+				g_sysmap = realloc(g_sysmap, allocd);
+				if (g_sysmap == NULL) {
+					printf("Out of memory reading system.map <%s>\n", argv[optind]);
+					exit(1);
+				}
+			}
+
+			nread = read(smfd, &g_sysmap[g_sysmap_size], allocd - g_sysmap_size);
+			if (nread == -1) {
+				printf("Error reading system.map <%s>\n", argv[optind]);
+				exit(1);
+			}
+			g_sysmap_size += nread;
+		} while (nread != 0);
+		g_sysmap[g_sysmap_size] = '\0';
 		printf("Loaded system.map <%s> <%u> bytes\n", argv[optind], g_sysmap_size);
 	}
 	if (!cookedtty) { 
