@@ -1,5 +1,6 @@
 /* firescope - simple interface to Linux kernels over firewire 
-   Originally from Ben Herrenschmidt, hacked by Andi Kleen.
+   Originally from Ben Herrenschmidt, hacked by Andi Kleen,
+   hated by Lubomir Rintel.
    Subject to the GNU General Public License, v.2 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,10 +41,10 @@ static char		g_local_buf[1024+4];
 
 unsigned long		log_buf;
 unsigned long		log_buf_len;
-unsigned long		log_end;
-nodeaddr_t		log_end_addr;
-nodeaddr_t		logged_chars_addr;
-long			logged_chars;
+unsigned long		log_first_idx;
+nodeaddr_t		log_first_idx_addr;
+unsigned long		log_next_idx;
+nodeaddr_t		log_next_idx_addr;
 char *			log_buf_shadow;
 
 #define XMON_FW_FLAGS_OUT_ENTERED	0x00000001
@@ -519,61 +520,58 @@ static int fetch_kernel_log(void)
 		restore_console();
 		return -1;
 	}
-	log_end = rem_readl(log_end_addr);
-	log_end %= log_buf_len;
-	if (log_end == -1) { 
-		need_console();
-		printf("Cannot read log start. Target in bad state?\n\r");
-		restore_console();
-		free(log_buf_shadow);
-		log_buf = 0;
-		return -1;
-	}		
-	if (rem_ptrsize == 8)
-		logged_chars = rem_readq(logged_chars_addr);
-	else
-		logged_chars = rem_readl(logged_chars_addr);
-	if (logged_chars > log_buf_len)
-		logged_chars = log_buf_len;
+	log_first_idx = rem_readl(virt_to_phys(log_first_idx_addr));
+	log_next_idx = rem_readl(virt_to_phys(log_next_idx_addr));
 	return 0;
 }
 
-static int output_log(unsigned start, unsigned end, int skiptoline) 
+static void logwrite (FILE *file, void *ptr, size_t size)
+{
+	struct __attribute__((packed)) {
+		unsigned long long timestamp;
+		unsigned short reclen;
+		unsigned short textlen;
+		unsigned short dictlen;
+		char facility;
+		char level;
+		char payload;
+	} *p;
+
+	for (p = ptr; (void *)p < ptr + size; p = (void *)p + p->reclen) {
+		// Wrap around
+		if (p->reclen == 0)
+			break;
+
+		fwrite(&p->payload, p->textlen, 1, file);
+		fputc('\r', file);
+		fputc('\n', file);
+	}
+}
+
+static int output_log(unsigned start, unsigned end)
 { 
 	need_console();
 	unsigned rstart = start > 3 ? (start - 3) & ~3UL : 0;
 	unsigned rend = (end + 3) & ~3UL;
 	if (rem_readblk(log_buf_shadow + rstart, log_buf + rstart, rend - rstart) < 0) 
 		return 0;
-	int i;
-	if (skiptoline) { 
-		for (i = start; i < end; i++) 
-			if (log_buf_shadow[i] == '\n') {
-				start = i;
-				break;
-			}
-	}
-	// XXX someone who understands terminals better than me
-	// should figure out how to get rid of the extraneous 
-	// newlines
-	fwrite(log_buf_shadow + start, 1, end-start, stdout);
+
+	/* Actual output. */
+	logwrite(stdout, log_buf_shadow + start, end-start);
 	if (logfile)
-		fwrite(log_buf_shadow + start, 1, end-start, logfile);
+		logwrite(logfile, log_buf_shadow + start, end-start);
+
 	restore_console();
 	return 1;
 } 
 
-static void __display_dmesg(unsigned l, int skiptoline)
+static void __display_dmesg(unsigned l)
 {
-	// should read backwards like the kernel code
-	// or catch races by  rechecking the variables
-	if (l > log_end) {
-		if (output_log(0, log_end, skiptoline)) 
-			skiptoline = 0;
-		l -= log_end;
-		output_log(log_buf_len - l, log_buf_len, skiptoline);
+	if (l > log_next_idx) {
+		output_log(l, log_buf_len);
+		output_log(0, log_next_idx);
 	} else { 
-		output_log(log_end - l, log_end, skiptoline);
+		output_log(l, log_next_idx);
 	} 
 }
 
@@ -581,26 +579,23 @@ static void display_dmesg(void)
 {
 	if (fetch_kernel_log() < 0)
 		return;
-	__display_dmesg(logged_chars, 0);
+	__display_dmesg(log_first_idx);
 }
 
 int first_update;
 
 static void update_dmesg(void)
 {
-	unsigned old_log_end = log_end;
-	if (fetch_kernel_log() < 0) 
+	unsigned old_log_next_idx = log_next_idx;
+	if (fetch_kernel_log() < 0) {
 		return;
-	if (0 && log_end != old_log_end)
-		printf("log_end %d old_log_end %d\n\r", log_end, old_log_end);
+	}
+	if (0 && log_next_idx != old_log_next_idx)
+		printf("log_next_idx %d old_log_next_idx %d\n\r", log_next_idx, old_log_next_idx);
 	if (first_update != 0 && !cookedtty) { 
-		__display_dmesg(300, 1);
 		first_update = 0;
-	} else if (log_end > old_log_end) { 
-		__display_dmesg(log_end - old_log_end + 1, 0);
-	} else if (log_end < old_log_end) { /* wrapping */
-		printf("<W>"); 
-		__display_dmesg(log_end + (log_buf_len - old_log_end) + 1, 0);
+	} else if (log_next_idx != old_log_next_idx) {
+		__display_dmesg(old_log_next_idx);
 	} /* else nothing to dump */
 }
 
@@ -611,15 +606,14 @@ static void lookup_kernel_log(void)
 	C(log_buf_addr);
 	unsigned long long log_buf_len_addr = find_symbol("log_buf_len", sym_data|sym_bss,NULL);
 	C(log_buf_len_addr);
-	log_end_addr = find_symbol("log_end", sym_data|sym_bss,NULL);	
-	C(log_end_addr);
-	logged_chars_addr = find_symbol("logged_chars", sym_data|sym_bss,NULL);
+	log_first_idx_addr = find_symbol("log_first_idx", sym_data|sym_bss,NULL);
+	C(log_first_idx_addr);
+	log_next_idx_addr = find_symbol("log_next_idx", sym_data|sym_bss,NULL);
+	C(log_next_idx_addr);
 #undef C
 
 	log_buf = virt_to_phys(rem_readptr(virt_to_phys(log_buf_addr)));
 	log_buf_len = rem_readl(virt_to_phys(log_buf_len_addr));
-	log_end_addr = virt_to_phys(log_end_addr);
-	logged_chars_addr = virt_to_phys(logged_chars_addr);
 
 	need_console();
 	printf("kernel buffer at phys %lx len %lu\n\r", log_buf, log_buf_len);
