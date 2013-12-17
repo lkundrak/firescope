@@ -614,6 +614,10 @@ static void lookup_kernel_log(void)
 
 	log_buf = virt_to_phys(rem_readptr(virt_to_phys(log_buf_addr)));
 	log_buf_len = rem_readl(virt_to_phys(log_buf_len_addr));
+	if (log_buf_len == -1) {
+		printf("Cannot read log_buf_len\n");
+		goto out;
+	}
 
 	need_console();
 	printf("kernel buffer at phys %lx len %lu\n\r", log_buf, log_buf_len);
