@@ -1,0 +1,59 @@
+.TH FIRESCOPE 1 
+.SH NAME
+firescope \- read linux kernel logs over firewire
+.SH SYNOPSIS
+.B firescope [-t] [-A] [-aTARGET] [-wLOGFILE] [System.map]
+.SH DESCRIPTION
+Firescope allows to read remote kernel memory over a firewire connection.
+On x86-64 it is normally used to read the kernel log buffer.
+
+On ppc it can be also used to operate xmon, but that is not described here.
+
+.B -aNUM
+attaches to the target NUMBER. See the menu shown by Ctrl-T 
+for valid numbers.
+
+.B -A
+means attach to the first non local target.
+
+-B -u
+starts auto update modus directly without pressing any keys. 
+
+The
+.B -wLOGFILE
+option writes a logfile of all log output from the target.
+
+When the
+.B -t
+option is specified firescope doesn't enable terminal mode.
+The normal keyboard commands don't work then. Implies -u.
+
+System.map is the system table of the target kernel.
+This cannot be /proc/kallsyms right now.
+
+When 
+.I -t
+is not specified the program accepts Ctrl commands. See the help
+menu for details.
+
+.SH EXAMPLES
+firescope -wLOG -tA System.map
+
+Attach to first non local target and continuously log the kernel log
+to stdout and LOG.
+
+.SH NOTES
+The target must have the ohci1394 driver loaded. This implies
+that firescope cannot be used in early boot.
+
+The raw1394 module must be loaded and its device node
+be writable (this normally requires root) 
+
+ppc is untested
+
+The target must have the same bitness. For 32bit targets use
+firescope32
+
+Doesn't work with Xen.
+
+Only tested on x86-64. ppc support might be bitrotted now.

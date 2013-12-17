@@ -1,0 +1,10 @@
+
+- 0.2 
+Include manpage
+
+- 0.2.2
+Add support accessing 64-bit targets from 32-bit firescope and vice versa
+(Bernhard Kaindl)
+
+TODO:
+- Use fast block reads to accelerate remote memory reading.

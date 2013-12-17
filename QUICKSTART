@@ -1,0 +1,15 @@
+
+If you have a single other system connected using firewire and
+just want to get the logs from there use as root
+
+modprobe raw1394
+firescope -Aut System.map
+
+If you want a log file add -wLOGFILE
+
+System.map is the System.map from the target system
+
+(or firescope32 .. if it's a 32bit target)
+
+For more information, see:
+ftp://ftp.suse.de/private/bk/firewire/docs/debugging-via-ohci1394.txt
