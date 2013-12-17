@@ -300,12 +300,10 @@ write_quadlet(void)
 	int rc;
 	char tmp[128];
 	char datastr[128];
-	char* p;
 	
 	need_console();
 	printf("Write to [address,data]: ");
 	scanf("%128s %128s", tmp, datastr);
-	p = tmp;
 	int length;
 	addr = parse_symbol(tmp,&length);
 	printf("Address %lx\n\r", addr);
