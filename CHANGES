@@ -6,5 +6,9 @@ Include manpage
 Add support accessing 64-bit targets from 32-bit firescope and vice versa
 (Bernhard Kaindl)
 
+- 0.3
+Add support structured message buffers in newer kernels
+(Lubomir Rintel)
+
 TODO:
 - Use fast block reads to accelerate remote memory reading.
